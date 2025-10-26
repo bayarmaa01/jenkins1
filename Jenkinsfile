@@ -1,55 +1,51 @@
-pipeline {
-    agent any
-
-    stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-                echo "Branch: ${env.BRANCH_NAME}"
-            }
-        }
-
-        stage('Build') {
-            steps {
-                echo "Building ${env.BRANCH_NAME} branch..."
-            }
-        }
-
-        stage('Test') {
-            steps {
-                script {
-                    if (env.BRANCH_NAME == 'main') {
-                        echo "[main] Run full integration tests"
-                    } else if (env.BRANCH_NAME == 'develop') {
-                        echo "[develop] Run regression tests"
-                    } else if (env.BRANCH_NAME.startsWith('feature/')) {
-                        echo "[feature/*] Run quick unit tests"
-                    } else {
-                        echo "Other branch – basic checks"
-                    }
-                }
-            }
-        }
-
-        stage('Deploy') {
-            when {
-                anyOf {
-                    branch 'main'
-                    branch 'develop'
-                }
-            }
-            steps {
-                echo "Deploying ${env.BRANCH_NAME} branch..."
-            }
-        }
+node {
+  try {
+    stage('Checkout') {
+      echo "Cloning repository..."
+      git branch: 'main', url: 'https://github.com/BayarmaaBumandorj/my-maven-app.git'
+      sh 'ls -la'
     }
 
-    post {
-        success {
-            echo "✅ ${env.BRANCH_NAME} build completed successfully."
+    stage('Parallel Tests') {
+      parallel(
+        unit: {
+          stage('Unit Tests') {
+            echo "Running unit tests..."
+            dir('.') {
+              sh 'mvn -Dtest=**/*UnitTest test || true'
+              junit '**/target/surefire-reports/*.xml'
+            }
+          }
+        },
+        integration: {
+          stage('Integration Tests') {
+            echo "Running integration tests..."
+            dir('.') {
+              sh 'mvn -Pintegration-test verify || true'
+              junit '**/target/failsafe-reports/*.xml'
+            }
+          }
         }
-        failure {
-            echo "❌ ${env.BRANCH_NAME} build failed."
-        }
+      )
     }
+  } catch (e) {
+    currentBuild.result = 'FAILURE'
+    echo "Build failed due to: ${e}"
+    throw e
+  } finally {
+    stage('Archive Reports') {
+      echo "Archiving reports..."
+      archiveArtifacts artifacts: '**/target/*.xml, **/target/*.log', allowEmptyArchive: true
+    }
+
+    stage('Notify') {
+      script {
+        if (currentBuild.result == 'FAILURE') {
+          echo "Sending notification: build failed"
+        } else {
+          echo "Build succeeded ✅"
+        }
+      }
+    }
+  }
 }
