@@ -1,1 +1,3 @@
-This repository is used for Jenkins automation testing.
+jenkins-shared-lib
+
+Provides a global step printBuildInfo() which prints BUILD_NUMBER and BRANCH_NAME.
