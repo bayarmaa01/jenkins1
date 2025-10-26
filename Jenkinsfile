@@ -1,51 +1,66 @@
 node {
-  try {
     stage('Checkout') {
-      echo "Cloning repository..."
-      git branch: 'main', url: 'https://github.com/BayarmaaBumandorj/my-maven-app.git'
-      sh 'ls -la'
+        echo 'Checking out source code...'
+        checkout scm
+    }
+
+    stage('Build') {
+        echo 'Building the application...'
+        sh 'mvn clean package -DskipTests'
     }
 
     stage('Parallel Tests') {
-      parallel(
-        unit: {
-          stage('Unit Tests') {
-            echo "Running unit tests..."
-            dir('.') {
-              sh 'mvn -Dtest=**/*UnitTest test || true'
-              junit '**/target/surefire-reports/*.xml'
+        parallel(
+            "Unit Tests": {
+                stage('Unit Tests') {
+                    try {
+                        echo 'Running unit tests...'
+                        sh 'mvn test -Dtest=*UnitTest'
+                        junit '**/target/surefire-reports/*.xml'
+                    } catch (err) {
+                        echo "❌ Unit tests failed: ${err}"
+                        currentBuild.result = 'FAILURE'
+                        throw err
+                    }
+                }
+            },
+            "Integration Tests": {
+                stage('Integration Tests') {
+                    try {
+                        echo 'Running integration tests...'
+                        sh 'mvn verify -Dtest=*IntegrationTest'
+                        junit '**/target/failsafe-reports/*.xml'
+                    } catch (err) {
+                        echo "❌ Integration tests failed: ${err}"
+                        currentBuild.result = 'FAILURE'
+                        throw err
+                    }
+                }
             }
-          }
-        },
-        integration: {
-          stage('Integration Tests') {
-            echo "Running integration tests..."
-            dir('.') {
-              sh 'mvn -Pintegration-test verify || true'
-              junit '**/target/failsafe-reports/*.xml'
-            }
-          }
-        }
-      )
-    }
-  } catch (e) {
-    currentBuild.result = 'FAILURE'
-    echo "Build failed due to: ${e}"
-    throw e
-  } finally {
-    stage('Archive Reports') {
-      echo "Archiving reports..."
-      archiveArtifacts artifacts: '**/target/*.xml, **/target/*.log', allowEmptyArchive: true
+        )
     }
 
-    stage('Notify') {
-      script {
-        if (currentBuild.result == 'FAILURE') {
-          echo "Sending notification: build failed"
-        } else {
-          echo "Build succeeded ✅"
-        }
-      }
+    stage('Post-build Actions') {
+        echo 'Archiving reports...'
+        archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true
+        junit allowEmptyResults: true, testResults: '**/target/*-reports/*.xml'
     }
-  }
+}
+
+post {
+    failure {
+        echo 'Build failed! Sending email notification...'
+        emailext(
+            to: 'b.bayarmaa0321@gmail.com',
+            subject: "❌ Jenkins Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+            body: """
+                <p>Build <b>${env.JOB_NAME} #${env.BUILD_NUMBER}</b> failed.</p>
+                <p>Check console output at: <a href='${env.BUILD_URL}'>${env.BUILD_URL}</a></p>
+            """,
+            attachLog: true
+        )
+    }
+    success {
+        echo '✅ Build succeeded!'
+    }
 }
