@@ -1,30 +1,39 @@
 pipeline {
-  agent { label '' } // empty means any available agent; ensure agent has docker CLI
+  agent any
   environment {
-    DOCKERHUB_REPO = "bayarmaa/jenkins-demo"   // CHANGE this to your Docker Hub repo
+    // Replace with your actual Docker Hub repo (already used in your pipeline logs)
+    DOCKERHUB_REPO = "bayarmaa/jenkins-demo"
     IMAGE_TAG = "${env.BUILD_NUMBER}"
-    IMAGE = "${env.DOCKERHUB_REPO}:${env.IMAGE_TAG}"
+    IMAGE = "${DOCKERHUB_REPO}:${IMAGE_TAG}"
   }
 
   options {
-    // keep timestamps to help debug
     timestamps()
-    // keep last 10 builds
     buildDiscarder(logRotator(numToKeepStr: '10'))
   }
 
   stages {
     stage('Checkout') {
       steps {
+        echo "Checkout from SCM..."
         checkout scm
+      }
+    }
+
+    stage('Show files') {
+      steps {
+        echo "Workspace contents:"
+        sh 'pwd; ls -la'
       }
     }
 
     stage('Build Docker image') {
       steps {
         echo "Building Docker image ${env.IMAGE}"
-        // use docker CLI to build (requires docker on agent)
+        // Use BuildKit if available (optional). Fallback to normal build.
         sh '''
+          # enable BuildKit if available (non-fatal)
+          export DOCKER_BUILDKIT=1 || true
           docker --version
           docker build -t ${IMAGE} .
         '''
@@ -34,10 +43,11 @@ pipeline {
     stage('Login & Push to Docker Hub') {
       steps {
         script {
-          // Use Jenkins credential (username/password) to login and push
-          withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', usernameVariable: 'DOCKERHUB_USER', passwordVariable: 'DOCKERHUB_PASS')]) {
+          // Use the Jenkins credential ID you have (from your log: dockerhub-credentials)
+          withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKERHUB_USER', passwordVariable: 'DOCKERHUB_PASS')]) {
             sh '''
-              echo "Logging in to Docker Hub as ${DOCKERHUB_USER}"
+              set -e
+              echo "Logging in as ${DOCKERHUB_USER} (token masked)"
               echo "${DOCKERHUB_PASS}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
               docker push ${IMAGE}
               docker logout
@@ -46,17 +56,17 @@ pipeline {
         }
       }
     }
-  }
+  } // stages
 
   post {
     success {
-      echo "Docker image pushed: ${env.IMAGE}"
+      echo "Docker image pushed: ${IMAGE}"
     }
     failure {
-      echo "Build failed — not pushed"
+      echo "Build failed — image not pushed"
     }
     always {
-      // optional: clean up local images on agent to save disk
+      // cleanup local image to free disk space
       sh '''
         docker rmi ${IMAGE} || true
       '''
