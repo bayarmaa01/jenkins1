@@ -1,7 +1,7 @@
 pipeline {
   agent { label '' } // empty means any available agent; ensure agent has docker CLI
   environment {
-    DOCKERHUB_REPO = "yourdockerhubuser/your-repo"   // CHANGE this to your Docker Hub repo
+    DOCKERHUB_REPO = "bayarmaa/jenkins-demo"   // CHANGE this to your Docker Hub repo
     IMAGE_TAG = "${env.BUILD_NUMBER}"
     IMAGE = "${env.DOCKERHUB_REPO}:${env.IMAGE_TAG}"
   }
