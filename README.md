@@ -1,3 +1,19 @@
-jenkins-shared-lib
+# Docker Jenkins Integration Demo
 
-Provides a global step printBuildInfo() which prints BUILD_NUMBER and BRANCH_NAME.
+This project demonstrates Jenkins CI/CD pipeline with Docker integration.
+
+## Features
+- Automated Docker image building
+- Push to Docker Hub
+- Health checks
+- Multi-stage deployment
+
+## Running Locally
+```bash
+docker build -t myapp .
+docker run -p 3000:3000 myapp
+```
+
+## Endpoints
+- `GET /` - Main endpoint
+- `GET /health` - Health check

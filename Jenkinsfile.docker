@@ -1,0 +1,256 @@
+pipeline {
+    agent any
+    
+    environment {
+        // Docker Hub credentials
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
+        
+        // Docker image details
+        DOCKERHUB_USERNAME = 'bayarmaa'  // Replace with your Docker Hub username
+        IMAGE_NAME = 'jenkins-docker-app'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        FULL_IMAGE_NAME = "${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+        LATEST_IMAGE_NAME = "${DOCKERHUB_USERNAME}/${IMAGE_NAME}:latest"
+    }
+    
+    stages {
+        stage('Verify Docker') {
+            steps {
+                script {
+                    echo "========================================="
+                    echo "  DOCKER ENVIRONMENT VERIFICATION"
+                    echo "========================================="
+                    
+                    sh '''
+                        echo "Docker Version:"
+                        docker --version
+                        
+                        echo ""
+                        echo "Docker Info:"
+                        docker info | head -20
+                        
+                        echo ""
+                        echo "Docker is ready!"
+                    '''
+                }
+            }
+        }
+        
+        stage('Checkout') {
+            steps {
+                echo "Checking out source code..."
+                checkout scm
+                
+                sh '''
+                    echo "Repository contents:"
+                    ls -la
+                    
+                    echo ""
+                    echo "Verifying Dockerfile exists:"
+                    test -f Dockerfile && echo "✅ Dockerfile found" || echo "❌ Dockerfile not found"
+                '''
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    echo "========================================="
+                    echo "  BUILDING DOCKER IMAGE"
+                    echo "========================================="
+                    echo "Image: ${FULL_IMAGE_NAME}"
+                    
+                    sh """
+                        # Build Docker image
+                        docker build -t ${FULL_IMAGE_NAME} .
+                        
+                        # Also tag as latest
+                        docker tag ${FULL_IMAGE_NAME} ${LATEST_IMAGE_NAME}
+                        
+                        echo ""
+                        echo "✅ Docker image built successfully!"
+                        
+                        # List images
+                        echo ""
+                        echo "Built images:"
+                        docker images | grep ${IMAGE_NAME}
+                    """
+                }
+            }
+        }
+        
+        stage('Test Docker Image') {
+            steps {
+                script {
+                    echo "========================================="
+                    echo "  TESTING DOCKER IMAGE"
+                    echo "========================================="
+                    
+                    sh """
+                        # Run container in background
+                        echo "Starting test container..."
+                        CONTAINER_ID=\$(docker run -d -p 3001:3000 ${FULL_IMAGE_NAME})
+                        echo "Container ID: \$CONTAINER_ID"
+                        
+                        # Wait for container to start
+                        echo "Waiting for application to start..."
+                        sleep 10
+                        
+                        # Test health endpoint
+                        echo "Testing health endpoint..."
+                        curl -f http://localhost:3001/health || exit 1
+                        
+                        # Test main endpoint
+                        echo ""
+                        echo "Testing main endpoint..."
+                        curl -f http://localhost:3001/ || exit 1
+                        
+                        # Check container logs
+                        echo ""
+                        echo "Container logs:"
+                        docker logs \$CONTAINER_ID
+                        
+                        # Stop and remove test container
+                        echo ""
+                        echo "Cleaning up test container..."
+                        docker stop \$CONTAINER_ID
+                        docker rm \$CONTAINER_ID
+                        
+                        echo ""
+                        echo "✅ Docker image tests passed!"
+                    """
+                }
+            }
+        }
+        
+        stage('Login to Docker Hub') {
+            steps {
+                script {
+                    echo "========================================="
+                    echo "  LOGGING IN TO DOCKER HUB"
+                    echo "========================================="
+                    
+                    sh '''
+                        # Login to Docker Hub using credentials
+                        echo "$DOCKERHUB_CREDENTIALS_PSW" | docker login -u "$DOCKERHUB_CREDENTIALS_USR" --password-stdin
+                        
+                        echo "✅ Successfully logged in to Docker Hub"
+                    '''
+                }
+            }
+        }
+        
+        stage('Push to Docker Hub') {
+            steps {
+                script {
+                    echo "========================================="
+                    echo "  PUSHING TO DOCKER HUB"
+                    echo "========================================="
+                    
+                    sh """
+                        # Push versioned image
+                        echo "Pushing ${FULL_IMAGE_NAME}..."
+                        docker push ${FULL_IMAGE_NAME}
+                        
+                        # Push latest image
+                        echo ""
+                        echo "Pushing ${LATEST_IMAGE_NAME}..."
+                        docker push ${LATEST_IMAGE_NAME}
+                        
+                        echo ""
+                        echo "✅ Images pushed successfully to Docker Hub!"
+                        echo ""
+                        echo "Image URLs:"
+                        echo "  - ${FULL_IMAGE_NAME}"
+                        echo "  - ${LATEST_IMAGE_NAME}"
+                    """
+                }
+            }
+        }
+        
+        stage('Cleanup') {
+            steps {
+                script {
+                    echo "========================================="
+                    echo "  CLEANING UP LOCAL IMAGES"
+                    echo "========================================="
+                    
+                    sh """
+                        # Remove local images to save space
+                        docker rmi ${FULL_IMAGE_NAME} || true
+                        docker rmi ${LATEST_IMAGE_NAME} || true
+                        
+                        # Prune unused images
+                        docker image prune -f
+                        
+                        echo "✅ Cleanup completed"
+                    """
+                }
+            }
+        }
+        
+        stage('Deployment Info') {
+            steps {
+                script {
+                    echo "========================================="
+                    echo "  DEPLOYMENT INFORMATION"
+                    echo "========================================="
+                    echo ""
+                    echo "Docker Image: ${FULL_IMAGE_NAME}"
+                    echo "Docker Hub: https://hub.docker.com/r/${DOCKERHUB_USERNAME}/${IMAGE_NAME}"
+                    echo ""
+                    echo "To run this image:"
+                    echo "  docker pull ${FULL_IMAGE_NAME}"
+                    echo "  docker run -p 3000:3000 ${FULL_IMAGE_NAME}"
+                    echo ""
+                    echo "To run latest version:"
+                    echo "  docker pull ${LATEST_IMAGE_NAME}"
+                    echo "  docker run -p 3000:3000 ${LATEST_IMAGE_NAME}"
+                    echo ""
+                    echo "========================================="
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                echo "========================================="
+                echo "  PIPELINE CLEANUP"
+                echo "========================================="
+                
+                // Logout from Docker Hub
+                sh 'docker logout || true'
+                
+                // Clean up any stopped containers
+                sh 'docker container prune -f || true'
+                
+                echo "Pipeline execution completed at: ${new Date()}"
+            }
+        }
+        
+        success {
+            script {
+                echo "========================================="
+                echo "  ✅ PIPELINE SUCCEEDED"
+                echo "========================================="
+                echo "Build Number: ${BUILD_NUMBER}"
+                echo "Docker Image: ${FULL_IMAGE_NAME}"
+                echo "View on Docker Hub: https://hub.docker.com/r/${DOCKERHUB_USERNAME}/${IMAGE_NAME}/tags"
+                echo "========================================="
+            }
+        }
+        
+        failure {
+            script {
+                echo "========================================="
+                echo "  ❌ PIPELINE FAILED"
+                echo "========================================="
+                echo "Build Number: ${BUILD_NUMBER}"
+                echo "Check the logs above for error details"
+                echo "========================================="
+            }
+        }
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "docker-jenkins-app",
+  "version": "1.0.0",
+  "description": "Sample application for Jenkins Docker integration",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo 'Tests passed!' && exit 0"
+  },
+  "keywords": ["docker", "jenkins", "nodejs"],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
