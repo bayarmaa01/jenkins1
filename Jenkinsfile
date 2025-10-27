@@ -1,10 +1,11 @@
 pipeline {
   agent any
+
   environment {
-    // Replace with your actual Docker Hub repo (already used in your pipeline logs)
-    DOCKERHUB_REPO = "bayarmaa/jenkins-demo"
+    DOCKERHUB_REPO = "bayarmaa/jenkins-demo"   // <-- change to your repo if different
     IMAGE_TAG = "${env.BUILD_NUMBER}"
     IMAGE = "${DOCKERHUB_REPO}:${IMAGE_TAG}"
+    CREDENTIALS_ID = "dockerhub-credentials"   // <-- use the Jenkins credential id you have
   }
 
   options {
@@ -15,7 +16,6 @@ pipeline {
   stages {
     stage('Checkout') {
       steps {
-        echo "Checkout from SCM..."
         checkout scm
       }
     }
@@ -23,31 +23,49 @@ pipeline {
     stage('Show files') {
       steps {
         echo "Workspace contents:"
-        sh 'pwd; ls -la'
+        sh 'pwd; ls -la || true'
       }
     }
 
     stage('Build Docker image') {
       steps {
-        echo "Building Docker image ${env.IMAGE}"
-        // Use BuildKit if available (optional). Fallback to normal build.
-        sh '''
-          # enable BuildKit if available (non-fatal)
-          export DOCKER_BUILDKIT=1 || true
-          docker --version
-          docker build -t ${IMAGE} .
-        '''
+        script {
+          echo "Building Docker image ${IMAGE}"
+          // detect buildx availability and choose method
+          def buildCmd = """
+            set -e
+            echo "docker version:"
+            docker --version || true
+
+            echo "Checking for docker buildx..."
+            if docker buildx version >/dev/null 2>&1; then
+              echo "buildx available. Using buildx (BuildKit)."
+              # ensure builder exists and use default builder — create a builder if none
+              if ! docker buildx inspect default >/dev/null 2>&1; then
+                docker buildx create --use --name jenkins-builder || true
+              else
+                docker buildx use default || true
+              fi
+              # build with buildx and load into local docker (so we can push)
+              docker buildx build --load -t ${IMAGE} .
+            else
+              echo "buildx not available. Falling back to legacy docker build (disabling BuildKit)."
+              export DOCKER_BUILDKIT=0
+              docker build -t ${IMAGE} .
+            fi
+          """
+          sh buildCmd
+        }
       }
     }
 
     stage('Login & Push to Docker Hub') {
       steps {
         script {
-          // Use the Jenkins credential ID you have (from your log: dockerhub-credentials)
-          withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKERHUB_USER', passwordVariable: 'DOCKERHUB_PASS')]) {
+          withCredentials([usernamePassword(credentialsId: "${env.CREDENTIALS_ID}", usernameVariable: 'DOCKERHUB_USER', passwordVariable: 'DOCKERHUB_PASS')]) {
             sh '''
               set -e
-              echo "Logging in as ${DOCKERHUB_USER} (token masked)"
+              echo "Logging in to Docker Hub as ${DOCKERHUB_USER}"
               echo "${DOCKERHUB_PASS}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
               docker push ${IMAGE}
               docker logout
@@ -67,9 +85,7 @@ pipeline {
     }
     always {
       // cleanup local image to free disk space
-      sh '''
-        docker rmi ${IMAGE} || true
-      '''
+      sh 'docker rmi ${IMAGE} || true'
     }
   }
 }
