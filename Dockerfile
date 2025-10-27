@@ -1,26 +1,20 @@
+# Use Node.js 18 on a lightweight Alpine base
 FROM node:18-alpine
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy dependency files first
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install production dependencies
+RUN npm install --omit=dev
 
-# Copy application files
+# Copy the rest of the project files
 COPY . .
 
-# Expose port
+# Expose app port
 EXPOSE 3000
 
-# Set environment variable
-ENV NODE_ENV=production
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
-
-# Run application
-CMD ["npm", "start"]
+# Command to start your Node.js app
+CMD ["node", "server.js"]
